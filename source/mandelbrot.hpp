@@ -136,26 +136,52 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
             const FLT real2 = real + real_step;
             const FLT real3 = real2 + real_step;
             const FLT real4 = real3 + real_step;
-            const __m256d c_real = _mm256_set_pd(real, real2, real3, real4);
+            const __m256d c_real = _mm256_set_pd(real4, real3, real2, real);
 
             int n = 0;
+            int64_t converge = -1;
             __m256d sign_v = _mm256_setzero_pd();
             __m256d z_real = _mm256_setzero_pd();
             __m256d z_imag = _mm256_setzero_pd();
-            __m256d z_sqrabs = _mm256_sqrabs_pd(z_real, z_imag);
 
-            for (; n < iters;)
-            {
+            // Cardioid / Bulb checking
+            const __m256d imag_sqr = _mm256_set1_pd(imag * imag);
+            const __m256d sqrabs = _mm256_add_pd(imag_sqr, _mm256_mul_pd(c_real, c_real));
+            const __m256d q = _mm256_add_pd(_mm256_set1_pd(0.0625),
+                _mm256_sub_pd(sqrabs, _mm256_mul_pd(_mm256_set1_pd(0.5), c_real)));
+
+            const __m256d cmp1 = _mm256_cmp_pd(_mm256_mul_pd(q, _mm256_add_pd(q, _mm256_sub_pd(c_real, _mm256_set1_pd(0.25)))),
+                _mm256_mul_pd(_mm256_set1_pd(0.25), imag_sqr), _CMP_GE_OQ); // Cardioid
+            const __m256d cmp2 = _mm256_cmp_pd(_mm256_add_pd(sqrabs, _mm256_add_pd(c_real, c_real)),
+                _mm256_set1_pd(-0.9375), _CMP_GE_OQ); // Bulb
+            const __m256d cmp = _mm256_hadd_pd(cmp1, cmp2);
+
+            alignas(32) int64_t cmp_array[4];
+            _mm256_store_si256(reinterpret_cast<__m256i *>(cmp_array), _mm256_castpd_si256(cmp));
+
+            if ((cmp_array[0] | cmp_array[2]) == 0 || (cmp_array[1] | cmp_array[3]) == 0)
+            { // skip iterations for points in set
+                sign_v = _mm256_castsi256_pd(_mm256_set1_epi64x(iters));
+            }
+            else for (; n < iters && converge;)
+            { // iterations
                 for (int nupper = n + iter_step; n < nupper; ++n)
-                {
+                { // inner loop for multiple iterations
                     const __m256d temp = _mm256_mul_pd(z_real, z_imag);
                     z_real = _mm256_add_pd(c_real, _mm256_sub_pd(_mm256_mul_pd(z_real, z_real), _mm256_mul_pd(z_imag, z_imag)));
                     z_imag = _mm256_add_pd(c_imag, _mm256_add_pd(temp, temp));
                 }
 
-                z_sqrabs = _mm256_add_pd(_mm256_mul_pd(z_real, z_real), _mm256_mul_pd(z_imag, z_imag));
-                const __m256d cmp = _mm256_cmp_pd(z_sqrabs, cutoff_sqr_v, _CMP_LE_OQ);
+                // update current iterations until diverging
+                const __m256d z_sqrabs = _mm256_add_pd(_mm256_mul_pd(z_real, z_real), _mm256_mul_pd(z_imag, z_imag));
+                __m256d cmp = _mm256_cmp_pd(z_sqrabs, cutoff_sqr_v, _CMP_LE_OQ);
                 sign_v = _mm256_or_pd(_mm256_andnot_pd(cmp, sign_v), _mm256_and_pd(cmp, _mm256_castsi256_pd(_mm256_set1_epi64x(n))));
+
+                // judge if all elements in the vector are diverging
+                alignas(32) int64_t cmp_array[4];
+                cmp = _mm256_hadd_pd(cmp, cmp);
+                _mm256_store_si256(reinterpret_cast<__m256i *>(cmp_array), _mm256_castpd_si256(cmp));
+                converge = cmp_array[0] | cmp_array[2];
             }
 
             alignas(32) int sign[simd_step * 2];
@@ -165,10 +191,10 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
             {
             case 1:
             default:
-                dstp[0] = max_val - (max_val - min_val) * sign[6] / iters;
-                dstp[1] = max_val - (max_val - min_val) * sign[4] / iters;
-                dstp[2] = max_val - (max_val - min_val) * sign[2] / iters;
-                dstp[3] = max_val - (max_val - min_val) * sign[0] / iters;
+                dstp[0] = max_val - (max_val - min_val) * sign[0] / iters;
+                dstp[1] = max_val - (max_val - min_val) * sign[2] / iters;
+                dstp[2] = max_val - (max_val - min_val) * sign[4] / iters;
+                dstp[3] = max_val - (max_val - min_val) * sign[6] / iters;
             }
         }
 #elif defined(__SSE2__)
@@ -183,26 +209,51 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
         {
             const FLT real = static_cast<FLT>(real_start + real_step * i);
             const FLT real2 = real + real_step;
-            const __m128d c_real = _mm_set_pd(real, real2);
+            const __m128d c_real = _mm_set_pd(real2, real);
 
             int n = 0;
+            int64_t converge = -1;
             __m128i sign_v = _mm_setzero_si128();
             __m128d z_real = _mm_setzero_pd();
             __m128d z_imag = _mm_setzero_pd();
-            __m128d z_sqrabs = _mm_sqrabs_pd(z_real, z_imag);
 
-            for (; n < iters;)
+            // Cardioid / Bulb checking
+            const __m128d imag_sqr = _mm_set1_pd(imag * imag);
+            const __m128d sqrabs = _mm_add_pd(imag_sqr, _mm_mul_pd(c_real, c_real));
+            const __m128d q = _mm_add_pd(_mm_set1_pd(0.0625),
+                _mm_sub_pd(sqrabs, _mm_mul_pd(_mm_set1_pd(0.5), c_real)));
+
+            const __m128d cmp1 = _mm_cmpge_pd(_mm_mul_pd(q, _mm_add_pd(q, _mm_sub_pd(c_real, _mm_set1_pd(0.25)))),
+                _mm_mul_pd(_mm_set1_pd(0.25), imag_sqr)); // Cardioid
+            const __m128d cmp2 = _mm_cmpge_pd(_mm_add_pd(sqrabs, _mm_add_pd(c_real, c_real)),
+                _mm_set1_pd(-0.9375)); // Bulb
+
+            alignas(32) int64_t cmp_array[4];
+            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), _mm_castpd_si128(cmp1));
+            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array + 2), _mm_castpd_si128(cmp2));
+
+            if ((cmp_array[0] | cmp_array[1]) == 0 || (cmp_array[2] | cmp_array[3]) == 0)
+            { // skip iterations for points in set
+                sign_v = _mm_set1_epi64x(iters);
+            }
+            else for (; n < iters && converge;)
             {
                 for (int nupper = n + iter_step; n < nupper; ++n)
-                {
+                { // inner loop for multiple iterations
                     const __m128d temp = _mm_mul_pd(z_real, z_imag);
                     z_real = _mm_add_pd(c_real, _mm_sub_pd(_mm_mul_pd(z_real, z_real), _mm_mul_pd(z_imag, z_imag)));
                     z_imag = _mm_add_pd(c_imag, _mm_add_pd(temp, temp));
                 }
 
-                z_sqrabs = _mm_add_pd(_mm_mul_pd(z_real, z_real), _mm_mul_pd(z_imag, z_imag));
+                // update current iterations until diverging
+                const __m128d z_sqrabs = _mm_add_pd(_mm_mul_pd(z_real, z_real), _mm_mul_pd(z_imag, z_imag));
                 const __m128i cmp = _mm_castpd_si128(_mm_cmple_pd(z_sqrabs, cutoff_sqr_v));
                 sign_v = _mm_or_si128(_mm_andnot_si128(cmp, sign_v), _mm_and_si128(cmp, _mm_set1_epi64x(n)));
+
+                // judge if all elements in the vector are diverging
+                alignas(32) int64_t cmp_array[2];
+                _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), cmp);
+                converge = cmp_array[0] | cmp_array[1];
             }
 
             alignas(32) int sign[simd_step * 2];
@@ -212,8 +263,8 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
             {
             case 1:
             default:
-                dstp[0] = max_val - (max_val - min_val) * sign[2] / iters;
-                dstp[1] = max_val - (max_val - min_val) * sign[0] / iters;
+                dstp[0] = max_val - (max_val - min_val) * sign[0] / iters;
+                dstp[1] = max_val - (max_val - min_val) * sign[2] / iters;
             }
         }
 #endif
@@ -226,10 +277,20 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
             int n = 0;
             CT z = 0;
 
-            for (; n < iters && _sqrabs_(z) <= cutoff_sqr;)
-            {
+            // Cardioid / Bulb checking
+            const FLT imag_sqr = c.imag() * c.imag();
+            const FLT sqrabs = c.real() * c.real() + imag_sqr;
+            const FLT q = sqrabs - 0.5 * c.real() + 0.0625;
+
+            if (q * (q + (c.real() - 0.25)) < 0.25 * imag_sqr // Cardioid
+                || sqrabs + 2 * c.real() < -0.9375) // Bulb
+            { // skip iterations for points in set
+                n = iters;
+            }
+            else for (; n < iters && _sqrabs_(z) <= cutoff_sqr;)
+            { // iterations
                 for (int nupper = n + iter_step; n < nupper; ++n)
-                {
+                { // inner loop for multiple iterations
                     z = z * z + c;
                 }
             }

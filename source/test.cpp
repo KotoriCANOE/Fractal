@@ -10,6 +10,7 @@ int main(int argc, char **argv)
     const std::string winname = "Mandelbrot Set";
     int coloring = 1;
     int iter_step = 8;
+    double zoom_max = 50;
     std::string input;
 
     // Set resolution
@@ -142,14 +143,15 @@ int main(int argc, char **argv)
     filter.SetIterStep(iter_step);
     cv::Mat image(cv::Size(width, height), CV_8UC1);
 
-    while (true)
+    int64_t start_t = cv::getTickCount();
+    while (zoom < zoom_max)
     {
         int64_t start_t = cv::getTickCount();
         filter.SetZoom(zoom);
         filter.SetIters(iters);
         filter.Render(image.data, image.rows, image.cols, image.step, uchar(255), uchar(0));
         double duration = (cv::getTickCount() - start_t) * 1000 / cv::getTickFrequency();
-        std::cout << "zoom: " << zoom << ", max iterations: " << iters << ", time cost: " << duration << "ms.\n";
+        std::cout << "zoom: " << zoom << ", max iterations: " << iters << ", time elapsed: " << duration << "ms.\n";
 
         cv::imshow(winname, image);
         cv::setWindowTitle(winname, winname + " - zoom: " + std::to_string(zoom)
@@ -158,7 +160,10 @@ int main(int argc, char **argv)
         zoom += 0.02 * (1 + zoom * 0.05);
         iters += 1;
     }
+    double duration = (cv::getTickCount() - start_t) * 1000 / cv::getTickFrequency();
+    std::cout << "final zoom: " << zoom << ", max iterations: " << iters << ", total time elapsed: " << duration << "ms.\n";
 
+    cv::waitKey(0);
     cv::destroyAllWindows();
 
     return 0;

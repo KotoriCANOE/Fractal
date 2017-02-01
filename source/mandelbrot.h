@@ -42,14 +42,14 @@ public:
 
     std::complex<double> Position2Coordinate(int width, int height, int x, int y) const;
 
-    void Render(uint8_t *dst, int height, int width, size_t stride, uint8_t max_val, uint8_t min_val) const;
-    void Render(uint16_t *dst, int height, int width, size_t stride, uint16_t max_val, uint16_t min_val) const;
-    void Render(float *dst, int height, int width, size_t stride, float max_val, float min_val) const;
+    void Render(uint8_t *dst, int height, int width, size_t stride, uint8_t val_max, uint8_t min_val) const;
+    void Render(uint16_t *dst, int height, int width, size_t stride, uint16_t val_max, uint16_t min_val) const;
+    void Render(float *dst, int height, int width, size_t stride, float val_max, float min_val) const;
 
 private:
     void coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
         int width, int height) const;
 
     template <typename _Ty>
-    void render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const;
+    void render(std::vector<_Ty *> dst, int height, int width, size_t stride, _Ty val_max, _Ty min_val) const;
 };

@@ -64,19 +64,19 @@ std::complex<double> Mandelbrot::Position2Coordinate(int width, int height, int 
     return std::complex<double>(real_start + real_step * x, imag_start + imag_step * y);
 }
 
-void Mandelbrot::Render(uint8_t *dst, int height, int width, size_t stride, uint8_t max_val, uint8_t min_val) const
+void Mandelbrot::Render(uint8_t *dst, int height, int width, size_t stride, uint8_t val_max, uint8_t val_min) const
 {
-    render(dst, height, width, stride, max_val, min_val);
+    render(std::vector<uint8_t *>{dst}, height, width, stride, val_max, val_min);
 }
 
-void Mandelbrot::Render(uint16_t *dst, int height, int width, size_t stride, uint16_t max_val, uint16_t min_val) const
+void Mandelbrot::Render(uint16_t *dst, int height, int width, size_t stride, uint16_t val_max, uint16_t val_min) const
 {
-    render(dst, height, width, stride, max_val, min_val);
+    render(std::vector<uint16_t *>{dst}, height, width, stride, val_max, val_min);
 }
 
-void Mandelbrot::Render(float *dst, int height, int width, size_t stride, float max_val, float min_val) const
+void Mandelbrot::Render(float *dst, int height, int width, size_t stride, float val_max, float val_min) const
 {
-    render(dst, height, width, stride, max_val, min_val);
+    render(std::vector<float *>{dst}, height, width, stride, val_max, val_min);
 }
 
 // Implementation
@@ -97,11 +97,13 @@ static inline __m256d _mm256_sqrabs_pd(const __m256d r, const __m256d i)
 }
 
 template <typename _Ty>
-void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const
+void Mandelbrot::render(std::vector<_Ty *> dst, const int height, const int width, const size_t stride,
+    const _Ty val_max, const _Ty val_min) const
 {
     // Constants
     const int iters = (this->iters + iter_step - 1) / iter_step * iter_step; // set iters to a multiplier of iter_step
     const FLT cutoff_sqr = cutoff * cutoff;
+    const _Ty val_range = val_max - val_min;
 
     // Coordinate transformation
     double real_start, imag_start, real_step, imag_step;
@@ -117,7 +119,8 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
 #pragma omp parallel for
     for (int j = 0; j < height; ++j)
     {
-        _Ty *dstp = ArrayIndex(dst, stride, j);
+        std::vector<_Ty *> dstp;
+        for (auto &e : dst) { dstp.push_back(ArrayIndex(e, stride, j)); }
         const FLT imag = static_cast<FLT>(imag_start + imag_step * j);
         int i = 0;
 
@@ -129,7 +132,7 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
         const ptrdiff_t simd_residue = width % simd_step;
         const ptrdiff_t simd_width = width - simd_residue;
 
-        for (; i < simd_width; dstp += simd_step)
+        for (; i < simd_width; ([&](){for (auto &e : dstp) e += simd_step; })())
         {
             const FLT real = static_cast<FLT>(real_start + real_step * i++);
             const FLT real2 = static_cast<FLT>(real_start + real_step * i++);
@@ -153,12 +156,13 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
                 _mm256_mul_pd(_mm256_set1_pd(0.25), imag_sqr), _CMP_GE_OQ); // Cardioid
             const __m256d cmp2 = _mm256_cmp_pd(_mm256_add_pd(sqrabs, _mm256_add_pd(c_real, c_real)),
                 _mm256_set1_pd(-0.9375), _CMP_GE_OQ); // Bulb
-            const __m256d cmp = _mm256_hadd_pd(cmp1, cmp2);
+            const __m256d cmp3 = _mm256_hadd_pd(cmp1, cmp2);
+            const __m128d cmp = _mm_or_pd(_mm256_castpd256_pd128(cmp3), _mm256_extractf128_pd(cmp3, 1));
 
-            alignas(32) int64_t cmp_array[4];
-            _mm256_store_si256(reinterpret_cast<__m256i *>(cmp_array), _mm256_castpd_si256(cmp));
+            alignas(32) int64_t cmp_array[2];
+            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), _mm_castpd_si128(cmp));
 
-            if ((cmp_array[0] | cmp_array[2]) == 0 || (cmp_array[1] | cmp_array[3]) == 0)
+            if (cmp_array[0] == 0 || cmp_array[1] == 0)
             { // skip iterations for points in set
                 sign_v = _mm256_castsi256_pd(_mm256_set1_epi64x(iters));
             }
@@ -173,27 +177,53 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
 
                 // update current iterations until diverging
                 const __m256d z_sqrabs = _mm256_add_pd(_mm256_mul_pd(z_real, z_real), _mm256_mul_pd(z_imag, z_imag));
-                __m256d cmp = _mm256_cmp_pd(z_sqrabs, cutoff_sqr_v, _CMP_LE_OQ);
+                const __m256d cmp = _mm256_cmp_pd(z_sqrabs, cutoff_sqr_v, _CMP_LE_OQ);
                 sign_v = _mm256_or_pd(_mm256_andnot_pd(cmp, sign_v), _mm256_and_pd(cmp, _mm256_castsi256_pd(_mm256_set1_epi64x(n))));
 
                 // judge if all elements in the vector are diverging
-                alignas(32) int64_t cmp_array[4];
-                cmp = _mm256_hadd_pd(cmp, cmp);
-                _mm256_store_si256(reinterpret_cast<__m256i *>(cmp_array), _mm256_castpd_si256(cmp));
-                converge = cmp_array[0] | cmp_array[2];
+                const __m128i cmp2 = _mm_castpd_si128(_mm_or_pd(_mm256_castpd256_pd128(cmp), _mm256_extractf128_pd(cmp, 1)));
+                converge = _mm_cvtsi128_si64(_mm_or_si128(cmp2, _mm_srli_si128(cmp2, 8)));
             }
 
+            // Coloring
             alignas(32) int sign[simd_step * 2];
             _mm256_store_si256(reinterpret_cast<__m256i *>(sign), _mm256_castpd_si256(sign_v));
 
             switch (coloring)
             {
+            case 2:
+            {
+                break;
+            }
             case 1:
             default:
-                dstp[0] = max_val - (max_val - min_val) * sign[0] / iters;
-                dstp[1] = max_val - (max_val - min_val) * sign[2] / iters;
-                dstp[2] = max_val - (max_val - min_val) * sign[4] / iters;
-                dstp[3] = max_val - (max_val - min_val) * sign[6] / iters;
+            {
+                const __m128i sign_v2 = _mm_set_epi32(sign[6], sign[4], sign[2], sign[0]);
+                const __m128 val = _mm_sub_ps(_mm_set1_ps(static_cast<float>(val_max)), _mm_mul_ps(
+                    _mm_cvtepi32_ps(sign_v2), _mm_set1_ps(static_cast<float>(val_range) / iters)));
+
+                if (std::is_same<_Ty, uint8_t>())
+                {
+                    __m128i temp = _mm_cvtps_epi32(val);
+                    temp = _mm_packus_epi32(temp, temp);
+                    temp = _mm_packus_epi16(temp, temp);
+                    int res = _mm_cvtsi128_si32(temp);
+                    for (auto &e : dstp) *reinterpret_cast<int *>(e) = res;
+                }
+                else if (std::is_same<_Ty, uint16_t>())
+                {
+                    __m128i temp = _mm_cvtps_epi32(val);
+                    temp = _mm_packus_epi32(temp, temp);
+                    __int64 res = _mm_cvtsi128_si64(temp);
+                    for (auto &e : dstp) *reinterpret_cast<__int64 *>(e) = res;
+                }
+                else
+                {
+                    for (auto &e : dstp) _mm_storeu_ps(reinterpret_cast<float *>(e), val);
+                }
+
+                break;
+            }
             }
         }
 #elif defined(__SSE2__)
@@ -204,7 +234,7 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
         const ptrdiff_t simd_residue = width % simd_step;
         const ptrdiff_t simd_width = width - simd_residue;
 
-        for (; i < simd_width; dstp += simd_step)
+        for (; i < simd_width; ([&]() {for (auto &e : dstp) e += simd_step; })())
         {
             const FLT real = static_cast<FLT>(real_start + real_step * i++);
             const FLT real2 = static_cast<FLT>(real_start + real_step * i++);
@@ -226,12 +256,12 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
                 _mm_mul_pd(_mm_set1_pd(0.25), imag_sqr)); // Cardioid
             const __m128d cmp2 = _mm_cmpge_pd(_mm_add_pd(sqrabs, _mm_add_pd(c_real, c_real)),
                 _mm_set1_pd(-0.9375)); // Bulb
+            const __m128d cmp = _mm_or_pd(_mm_unpacklo_pd(cmp1, cmp2), _mm_unpackhi_pd(cmp1, cmp2));
 
-            alignas(32) int64_t cmp_array[4];
-            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), _mm_castpd_si128(cmp1));
-            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array + 2), _mm_castpd_si128(cmp2));
+            alignas(32) int64_t cmp_array[2];
+            _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), _mm_castpd_si128(cmp));
 
-            if ((cmp_array[0] | cmp_array[1]) == 0 || (cmp_array[2] | cmp_array[3]) == 0)
+            if (cmp_array[0] == 0 || cmp_array[1] == 0)
             { // skip iterations for points in set
                 sign_v = _mm_set1_epi64x(iters);
             }
@@ -250,9 +280,7 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
                 sign_v = _mm_or_si128(_mm_andnot_si128(cmp, sign_v), _mm_and_si128(cmp, _mm_set1_epi64x(n)));
 
                 // judge if all elements in the vector are diverging
-                alignas(32) int64_t cmp_array[2];
-                _mm_store_si128(reinterpret_cast<__m128i *>(cmp_array), cmp);
-                converge = cmp_array[0] | cmp_array[1];
+                converge = _mm_cvtsi128_si64(_mm_or_si128(cmp, _mm_srli_si128(cmp, 8)));
             }
 
             alignas(32) int sign[simd_step * 2];
@@ -262,12 +290,15 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
             {
             case 1:
             default:
-                dstp[0] = max_val - (max_val - min_val) * sign[0] / iters;
-                dstp[1] = max_val - (max_val - min_val) * sign[2] / iters;
+                for (auto &e : dstp)
+                {
+                    e[0] = val_max - val_range * sign[0] / iters;
+                    e[1] = val_max - val_range * sign[2] / iters;
+                }
             }
         }
 #endif
-        for (; i < width; ++i, ++dstp)
+        for (; i < width; ++i, ([&]() {for (auto &e : dstp) ++e; })())
         {
             const FLT real = static_cast<FLT>(real_start + real_step * i);
             const CT c(real, imag);
@@ -297,7 +328,10 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
             {
             case 1:
             default:
-                *dstp = max_val - (max_val - min_val) * n / iters;
+                for (auto &e : dstp)
+                {
+                    *e = val_max - val_range * n / iters;
+                }
             }
         }
     }

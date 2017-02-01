@@ -1,9 +1,9 @@
+#include "mandelbrot.h"
 #include <iostream>
 #include <iomanip>
 #include <functional>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
-#include "mandelbrot.h"
 
 typedef std::complex<double> CT;
 
@@ -19,12 +19,15 @@ static void MouseCallbackFunc(int event, int x, int y, int flags, void *userdata
 
 static int mandelbrot()
 {
+    // Debug
+    static const bool test_speed = false;
+
     // Initialize parameters
     const std::string winname_preview = "Mandelbrot Set <Preview>";
     const std::string winname_control = "Mandelbrot Set <Control>";
     int coloring = 1;
     int iter_step = 8;
-    double zoom_max = 50;
+    double zoom_max = test_speed ? 16 : 50;
     std::string input;
 
     // Standard I/O
@@ -37,7 +40,7 @@ static int mandelbrot()
 
     std::cout <<
         "Set the number of threads used for computing - default " + std::to_string(threads) + ".\n"
-        "    0 means the number of physical processor's thread is used.\n"
+        "    0 means the number of physical processors' threads is used.\n"
         "    Leaving it blank implies the default setting.\n";
 
     while (true)
@@ -343,6 +346,12 @@ static int mandelbrot()
     }
 
     // Render
+    if (!test_speed)
+    {
+        cv::namedWindow(winname_preview);
+        cv::waitKey(1);
+    }
+
     int64_t start_t = cv::getTickCount();
     while (zoom < zoom_max)
     {
@@ -353,10 +362,14 @@ static int mandelbrot()
         double duration = (cv::getTickCount() - start_t) * 1000 / cv::getTickFrequency();
         std::cout << "zoom: " << zoom << ", max iterations: " << iters << ", time elapsed: " << duration << "ms.\n";
 
-        cv::imshow(winname_preview, image);
-        cv::setWindowTitle(winname_preview, winname_preview + " - zoom: " + std::to_string(zoom)
-            + ", max iterations: " + std::to_string(iters));
-        if (cv::waitKey(1) == 27) break; // stop when pressing ESC
+        if (!test_speed)
+        {
+            cv::imshow(winname_preview, image);
+            cv::setWindowTitle(winname_preview, winname_preview + " - zoom: " + std::to_string(zoom)
+                + ", max iterations: " + std::to_string(iters));
+            if (cv::waitKey(1) == 27) break; // stop when pressing ESC
+        }
+
         zoom += 0.02 * (1 + zoom * 0.05);
         iters += iter_inc;
     }
@@ -364,6 +377,9 @@ static int mandelbrot()
     std::cout << "final zoom: " << zoom << ", max iterations: " << iters << ", total time elapsed: " << duration << "ms.\n";
 
     cv::waitKey(0);
+#ifdef _WIN32
+    if (test_speed) system("pause");
+#endif
     cv::destroyAllWindows();
     return 0;
 }

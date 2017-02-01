@@ -1,6 +1,4 @@
-#pragma once
-
-#include "utility.h"
+#include "mandelbrot.h"
 
 // Intrinsics
 #if defined(__AVX2__) || defined(__AVX__)
@@ -24,59 +22,16 @@
 #include <omp.h>
 #endif
 
-template <typename FLT = float>
-class Mandelbrot
-{
-public:
-    typedef Mandelbrot<FLT> _Myt;
-    typedef std::complex<FLT> CT;
-    const double BOUNDARY[4] = { 1, 1, -2, -1 }; // outer-most boundary: right, top, left, bottom
-
-private:
-    FLT cutoff;
-    int iters = 2048;
-    int iter_step = 8;
-
-    int coloring;
-    double center_real;
-    double center_imag;
-    double zoom = 0; // log2
-
-public:
-    explicit Mandelbrot(double center_real = -0.5, double center_imag = 0, int coloring = 1, FLT cutoff = 1 << 8);
-
-    void SetCenter(const double &center_real, const double &center_imag)
-    { this->center_real = center_real; this->center_imag = center_imag; }
-
-    int GetIters() const { return iters; }
-    void SetIters(const int &iters) { assert(iters > 1); this->iters = iters; }
-
-    int GetIterStep() const { return iter_step; }
-    void SetIterStep(const int &iter_step) { assert(iter_step > 0); this->iter_step = iter_step; }
-
-    double GetZoom() const { return zoom; }
-    void SetZoom(const double &zoom) { this->zoom = zoom; }
-
-    std::complex<double> Position2Coordinate(int width, int height, int x, int y) const;
-
-    template <typename _Ty>
-    void Render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const;
-
-private:
-    void coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
-        int width, int height) const;
-};
-
-template <typename FLT>
-Mandelbrot<FLT>::Mandelbrot(double center_real, double center_imag, int coloring, FLT cutoff)
+// Constructor
+Mandelbrot::Mandelbrot(double center_real, double center_imag, int coloring, FLT cutoff)
     : center_real(center_real), center_imag(center_imag), coloring(coloring), cutoff(cutoff)
 {
     assert(coloring > 0 && coloring < 2);
     assert(cutoff > 0);
 }
 
-template <typename FLT>
-void Mandelbrot<FLT>::coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
+// Methods
+void Mandelbrot::coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
     int width, int height) const
 {
     const double scale = pow(0.5, zoom);
@@ -101,14 +56,29 @@ void Mandelbrot<FLT>::coordinateHelper(double *real_start, double *imag_start, d
     *imag_step = imag_range / (height - 1);
 }
 
-template <typename FLT>
-std::complex<double> Mandelbrot<FLT>::Position2Coordinate(int width, int height, int x, int y) const
+std::complex<double> Mandelbrot::Position2Coordinate(int width, int height, int x, int y) const
 {
     double real_start, imag_start, real_step, imag_step;
     coordinateHelper(&real_start, &imag_start, &real_step, &imag_step, width, height);
     return std::complex<double>(real_start + real_step * x, imag_start + imag_step * y);
 }
 
+void Mandelbrot::Render(uint8_t *dst, int height, int width, size_t stride, uint8_t max_val, uint8_t min_val) const
+{
+    render(dst, height, width, stride, max_val, min_val);
+}
+
+void Mandelbrot::Render(uint16_t *dst, int height, int width, size_t stride, uint16_t max_val, uint16_t min_val) const
+{
+    render(dst, height, width, stride, max_val, min_val);
+}
+
+void Mandelbrot::Render(float *dst, int height, int width, size_t stride, float max_val, float min_val) const
+{
+    render(dst, height, width, stride, max_val, min_val);
+}
+
+// Implementation
 template <typename _Ty>
 static inline _Ty _sqrabs_(const std::complex<_Ty> &c)
 {
@@ -125,9 +95,8 @@ static inline __m256d _mm256_sqrabs_pd(const __m256d r, const __m256d i)
     return _mm256_add_pd(_mm256_mul_pd(r, r), _mm256_mul_pd(i, i));
 }
 
-template <typename FLT>
 template <typename _Ty>
-void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const
+void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const
 {
     // Constants
     const int iters = (this->iters + iter_step - 1) / iter_step * iter_step; // set iters to a multiplier of iter_step
@@ -323,7 +292,6 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
             case 1:
             default:
                 *dstp = max_val - (max_val - min_val) * n / iters;
-                //*dstp = n < iters ? max_val : min_val;
             }
         }
     }

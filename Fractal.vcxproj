@@ -23,10 +23,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="source\mandelbrot.cpp" />
     <ClCompile Include="source\test.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="source\mandelbrot.hpp" />
+    <ClInclude Include="source\mandelbrot.h" />
     <ClInclude Include="source\utility.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

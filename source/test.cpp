@@ -3,7 +3,7 @@
 #include <functional>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
-#include "mandelbrot.hpp"
+#include "mandelbrot.h"
 
 typedef std::complex<double> CT;
 
@@ -137,7 +137,7 @@ static int mandelbrot()
 
     std::cout << std::endl;
 
-    // For mode=1
+    // Interactive Mode
     if (mode == 1)
     {
         // Help
@@ -156,7 +156,7 @@ static int mandelbrot()
         int zoom100 = 0;
         int iters = 1024;
 
-        Mandelbrot<double> filter(center.real(), center.imag(), coloring);
+        Mandelbrot filter(center.real(), center.imag(), coloring);
         filter.SetIterStep(iter_step);
         cv::Mat image(cv::Size(width, height), CV_8UC1);
 
@@ -166,7 +166,7 @@ static int mandelbrot()
             const double zoom = zoom100 / 100.;
             filter.SetZoom(zoom);
             filter.SetIters(iters);
-            filter.Render(image.data, image.rows, image.cols, image.step, uchar(255), uchar(0));
+            filter.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
 
             cv::imshow(winname_preview, image);
             cv::setWindowTitle(winname_preview, winname_preview + " - zoom: " + std::to_string(zoom)
@@ -314,7 +314,7 @@ static int mandelbrot()
         iters += iter_inc;
     }
 
-    Mandelbrot<double> filter(center.real(), center.imag(), coloring);
+    Mandelbrot filter(center.real(), center.imag(), coloring);
     filter.SetIterStep(iter_step);
     cv::Mat image(cv::Size(width, height), CV_8UC1);
 
@@ -325,7 +325,7 @@ static int mandelbrot()
         int64_t start_t = cv::getTickCount();
         filter.SetZoom(zoom);
         filter.SetIters(iters);
-        filter.Render(image.data, image.rows, image.cols, image.step, uchar(255), uchar(0));
+        filter.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
         double duration = (cv::getTickCount() - start_t) * 1000 / cv::getTickFrequency();
         std::cout << "zoom: " << zoom << ", max iterations: " << iters << ", time elapsed: " << duration << "ms.\n";
 

@@ -146,8 +146,9 @@ static int mandelbrot()
             "    1. Use control panel to adjust zoom, iters, etc.\n"
             "        1.1. Note that the zoom here is 100x (e.g. 500 means 5.00)."
             "    2. Use mouse on preview window to adjust center, zoom, etc.\n"
-            "        2.1. Left click to change the center position.\n"
-            "        2.2. Scroll up to zoom-in, scroll down to zoom-out.\n"
+            "        2.1. Left button to drag the image.\n"
+            "        2.2. Right click to change the center position.\n"
+            "        2.3. Scroll up to zoom-in, scroll down to zoom-out.\n"
             "    3. Press ESC to exit.\n"
             ;
 
@@ -184,19 +185,50 @@ static int mandelbrot()
         cv::setTrackbarMin("iters", winname_control, 8);
 
         // Mouse
-        std::function<void(int event, int x, int y, int flags)> mouseAction([&](int event, int x, int y, int flags) {
+        int x_last = 0;
+        int y_last = 0;
+
+        std::function<void(int event, int x, int y, int flags)> mouseAction([&](int event, int x, int y, int flags)
+        {
             switch (event)
             {
-            case cv::EVENT_LBUTTONUP:
+            case cv::EVENT_LBUTTONDOWN: // left drag - down
             {
-                auto c = filter.Position2Coordinate(width, height, x, y);
-                filter.SetCenter(c.real(), c.imag());
+                x_last = x;
+                y_last = y;
+                break;
+            }
+            case cv::EVENT_MOUSEMOVE: // left drag - move
+            {
+                if ((flags & cv::EVENT_FLAG_LBUTTON) && (x != x_last || y != y_last))
+                {
+                    center += filter.Position2Coordinate(width, height, x_last, y_last) - filter.Position2Coordinate(width, height, x, y);
+                    x_last = x;
+                    y_last = y;
+                    filter.SetCenter(center.real(), center.imag());
+                    refreshPreview();
+                }
+                break;
+            }
+            case cv::EVENT_LBUTTONUP: // left drag - release
+            {
+                center += filter.Position2Coordinate(width, height, x_last, y_last) - filter.Position2Coordinate(width, height, x, y);
+                filter.SetCenter(center.real(), center.imag());
                 std::cout << std::setprecision(io_precision) << "Center position changed to "
-                    << c << std::setprecision(io_precision_origin) << std::endl;
+                    << center << std::setprecision(io_precision_origin) << std::endl;
+                if (x != x_last || y != y_last) refreshPreview();
+                break;
+            }
+            case cv::EVENT_RBUTTONUP: // right click
+            {
+                center = filter.Position2Coordinate(width, height, x, y);
+                filter.SetCenter(center.real(), center.imag());
+                std::cout << std::setprecision(io_precision) << "Center position changed to "
+                    << center << std::setprecision(io_precision_origin) << std::endl;
                 refreshPreview();
                 break;
             }
-            case cv::EVENT_MOUSEWHEEL:
+            case cv::EVENT_MOUSEWHEEL: // scrolling
             {
                 zoom100 += cv::getMouseWheelDelta(flags) / 30;
                 cv::setTrackbarPos("zoom", winname_control, zoom100);

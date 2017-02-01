@@ -71,6 +71,7 @@ template <typename FLT>
 Mandelbrot<FLT>::Mandelbrot(double center_real, double center_imag, int coloring, FLT cutoff)
     : center_real(center_real), center_imag(center_imag), coloring(coloring), cutoff(cutoff)
 {
+    assert(coloring > 0 && coloring < 2);
     assert(cutoff > 0);
 }
 

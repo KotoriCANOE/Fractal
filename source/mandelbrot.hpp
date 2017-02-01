@@ -45,6 +45,9 @@ private:
 public:
     explicit Mandelbrot(double center_real = -0.5, double center_imag = 0, int coloring = 1, FLT cutoff = 1 << 8);
 
+    void SetCenter(const double &center_real, const double &center_imag)
+    { this->center_real = center_real; this->center_imag = center_imag; }
+
     int GetIters() const { return iters; }
     void SetIters(const int &iters) { assert(iters > 1); this->iters = iters; }
 
@@ -54,11 +57,14 @@ public:
     double GetZoom() const { return zoom; }
     void SetZoom(const double &zoom) { this->zoom = zoom; }
 
+    std::complex<double> Position2Coordinate(int width, int height, int x, int y) const;
+
     template <typename _Ty>
     void Render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const;
 
 private:
-
+    void coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
+        int width, int height) const;
 };
 
 template <typename FLT>
@@ -66,6 +72,40 @@ Mandelbrot<FLT>::Mandelbrot(double center_real, double center_imag, int coloring
     : center_real(center_real), center_imag(center_imag), coloring(coloring), cutoff(cutoff)
 {
     assert(cutoff > 0);
+}
+
+template <typename FLT>
+void Mandelbrot<FLT>::coordinateHelper(double *real_start, double *imag_start, double *real_step, double *imag_step,
+    int width, int height) const
+{
+    const double scale = pow(0.5, zoom);
+    const double ratio = static_cast<double>(width) / height;
+    double real_range = BOUNDARY[0] - BOUNDARY[2];
+    double imag_range = BOUNDARY[1] - BOUNDARY[3];
+
+    if (ratio > real_range / imag_range)
+    {
+        real_range = imag_range * ratio;
+    }
+    else if (ratio < real_range / imag_range)
+    {
+        imag_range = real_range / ratio;
+    }
+
+    real_range *= scale;
+    imag_range *= scale;
+    *real_start = center_real - real_range / 2;
+    *imag_start = center_imag - imag_range / 2;
+    *real_step = real_range / (width - 1);
+    *imag_step = imag_range / (height - 1);
+}
+
+template <typename FLT>
+std::complex<double> Mandelbrot<FLT>::Position2Coordinate(int width, int height, int x, int y) const
+{
+    double real_start, imag_start, real_step, imag_step;
+    coordinateHelper(&real_start, &imag_start, &real_step, &imag_step, width, height);
+    return std::complex<double>(real_start + real_step * x, imag_start + imag_step * y);
 }
 
 template <typename _Ty>
@@ -88,33 +128,15 @@ template <typename FLT>
 template <typename _Ty>
 void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty max_val, _Ty min_val) const
 {
-    int iters = (this->iters + iter_step - 1) / iter_step * iter_step; // set iters to a multiplier of iter_step
+    // Constants
+    const int iters = (this->iters + iter_step - 1) / iter_step * iter_step; // set iters to a multiplier of iter_step
+    const FLT cutoff_sqr = cutoff * cutoff;
 
-    // Range calculation
-    const double scale = pow(0.5, zoom);
-    const double ratio = static_cast<double>(width) / height;
-    double real_range = BOUNDARY[0] - BOUNDARY[2];
-    double imag_range = BOUNDARY[1] - BOUNDARY[3];
-    
-    if (ratio > real_range / imag_range)
-    {
-        real_range = imag_range * ratio;
-    }
-    else if (ratio < real_range / imag_range)
-    {
-        imag_range = real_range / ratio;
-    }
-
-    real_range *= scale;
-    imag_range *= scale;
-    double real_start = center_real - real_range / 2;
-    double imag_start = center_imag - imag_range / 2;
-    double real_step = real_range / (width - 1);
-    double imag_step = imag_range / (height - 1);
+    // Coordinate transformation
+    double real_start, imag_start, real_step, imag_step;
+    coordinateHelper(&real_start, &imag_start, &real_step, &imag_step, width, height);
 
     // Kernel
-    FLT cutoff_sqr = cutoff * cutoff;
-
 #pragma omp parallel for
     for (int j = 0; j < height; ++j)
     {
@@ -130,12 +152,12 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
         const ptrdiff_t simd_residue = width % simd_step;
         const ptrdiff_t simd_width = width - simd_residue;
 
-        for (; i < simd_width; i += simd_step, dstp += simd_step)
+        for (; i < simd_width; dstp += simd_step)
         {
-            const FLT real = static_cast<FLT>(real_start + real_step * i);
-            const FLT real2 = real + real_step;
-            const FLT real3 = real2 + real_step;
-            const FLT real4 = real3 + real_step;
+            const FLT real = static_cast<FLT>(real_start + real_step * i++);
+            const FLT real2 = static_cast<FLT>(real_start + real_step * i++);
+            const FLT real3 = static_cast<FLT>(real_start + real_step * i++);
+            const FLT real4 = static_cast<FLT>(real_start + real_step * i++);
             const __m256d c_real = _mm256_set_pd(real4, real3, real2, real);
 
             int n = 0;
@@ -205,10 +227,10 @@ void Mandelbrot<FLT>::Render(_Ty *dst, int height, int width, size_t stride, _Ty
         const ptrdiff_t simd_residue = width % simd_step;
         const ptrdiff_t simd_width = width - simd_residue;
 
-        for (; i < simd_width; i += simd_step, dstp += simd_step)
+        for (; i < simd_width; dstp += simd_step)
         {
-            const FLT real = static_cast<FLT>(real_start + real_step * i);
-            const FLT real2 = real + real_step;
+            const FLT real = static_cast<FLT>(real_start + real_step * i++);
+            const FLT real2 = static_cast<FLT>(real_start + real_step * i++);
             const __m128d c_real = _mm_set_pd(real2, real);
 
             int n = 0;

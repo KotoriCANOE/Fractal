@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cfloat>
 #include <complex>
+#include <string>
+#include <vector>
 
 typedef long double ldbl;
 

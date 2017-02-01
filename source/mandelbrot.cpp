@@ -1,4 +1,5 @@
 #include "mandelbrot.h"
+#include <algorithm>
 
 // Intrinsics
 #if defined(__AVX2__) || defined(__AVX__)
@@ -107,6 +108,12 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
     coordinateHelper(&real_start, &imag_start, &real_step, &imag_step, width, height);
 
     // Kernel
+#ifdef _OPENMP
+    const int threads_origin = omp_get_max_threads();
+    const int threads_new = this->threads > 0 ? this->threads : std::max(1, omp_get_num_procs() - this->threads);
+    omp_set_num_threads(threads_new);
+#endif
+
 #pragma omp parallel for
     for (int j = 0; j < height; ++j)
     {
@@ -260,7 +267,6 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
             }
         }
 #endif
-
         for (; i < width; ++i, ++dstp)
         {
             const FLT real = static_cast<FLT>(real_start + real_step * i);
@@ -295,4 +301,8 @@ void Mandelbrot::render(_Ty *dst, int height, int width, size_t stride, _Ty max_
             }
         }
     }
+
+#ifdef _OPENMP
+    omp_set_num_threads(threads_origin);
+#endif
 }

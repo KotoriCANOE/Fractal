@@ -19,6 +19,7 @@ static void MouseCallbackFunc(int event, int x, int y, int flags, void *userdata
 
 static int mandelbrot()
 {
+    // Initialize parameters
     const std::string winname_preview = "Mandelbrot Set <Preview>";
     const std::string winname_control = "Mandelbrot Set <Control>";
     int coloring = 1;
@@ -31,13 +32,34 @@ static int mandelbrot()
     std::streamsize io_precision = 16;
     std::cout.setf(std::ios::fixed, std::ios::floatfield); // floatfield set to fixed
 
+    // Set thread number
+    int threads = 0;
+
+    std::cout <<
+        "Set the number of threads used for computing - default " + std::to_string(threads) + ".\n"
+        "    0 means the number of physical processor's thread is used.\n"
+        "    Leaving it blank implies the default setting.\n";
+
+    while (true)
+    {
+        std::cout << "Your option: ";
+        std::getline(std::cin, input);
+        if (input == "") break;
+        else threads = std::stoi(input);
+
+        if (0) std::cout << "Invalid input! Try again.\n";
+        else break;
+    }
+
+    std::cout << std::endl;
+
     // Set resolution
     int width = 1280;
     int height = 720;
 
     std::cout <<
         "Set rendering resolution - default " + std::to_string(width) + "x" + std::to_string(height) + ".\n"
-        "    Leave blank to use the default setting.\n";
+        "    Leaving it blank implies the default setting.\n";
 
     while (true)
     {
@@ -61,12 +83,12 @@ static int mandelbrot()
     std::cout << std::endl;
 
     // Choose center position
+    std::vector<CT> center_presets;
     // -1.401155, 0 | -1.4012, 0
     // -0.1528, 1.0397
     // -0.745429, 0.113008 | -0.74542900002, 0.11300799998
     // -0.77568377, 0.13646737 | -0.775683770001364, 0.136467369999090
     // -0.743643887037158704752191506114774, -0.131825904205311970493132056385139 | from FFmpeg
-    std::vector<CT> center_presets;
     center_presets.push_back({ -1.4012, 0 });
     center_presets.push_back({ -0.1528, 1.0397 });
     center_presets.push_back({ -0.74542900002, 0.11300799998 });
@@ -83,7 +105,7 @@ static int mandelbrot()
         "    3: " << center_presets[2].real() << " " << center_presets[2].imag() << "\n"
         "    4: " << center_presets[3].real() << " " << center_presets[3].imag() << "\n"
         "    5: " << center_presets[4].real() << " " << center_presets[4].imag() << "\n"
-        "    Leave blank to use the default setting.\n"
+        "    Leaving it blank implies the default setting.\n"
         "Your option: "
         << std::setprecision(io_precision_origin);
     std::getline(std::cin, input);
@@ -116,21 +138,28 @@ static int mandelbrot()
 
     std::cout << std::endl;
 
+    // Initialize renderer
+    Mandelbrot renderer(center.real(), center.imag(), coloring);
+    renderer.SetThreads(threads);
+    renderer.SetIterStep(iter_step);
+    cv::Mat image(cv::Size(width, height), CV_8UC1);
+
     // Choose mode
     int mode = 0;
 
     std::cout <<
-        "Set start iteration increment - default " + std::to_string(mode) + ".\n"
+        "Choose mode - default " + std::to_string(mode) + ".\n"
         "    0: animating mode, automatically zoom in\n"
         "    1: interactive mode, preview is refreshed everytime you adjust parameters\n"
-        "    Leave blank to use the default setting.\n"
-        "Your option: ";
+        "    Leaving it blank implies the default setting.\n";
 
     while (true)
     {
+        std::cout << "Your option: ";
         std::getline(std::cin, input);
         if (input == "") break;
         else mode = std::stoi(input);
+
         if (mode < 0 || mode > 1) std::cout << "Invalid input! Try again.\n";
         else break;
     }
@@ -152,21 +181,17 @@ static int mandelbrot()
             "    3. Press ESC to exit.\n"
             ;
 
-        // Initializations
+        // Initialize parameters
         int zoom100 = 0;
         int iters = 1024;
-
-        Mandelbrot filter(center.real(), center.imag(), coloring);
-        filter.SetIterStep(iter_step);
-        cv::Mat image(cv::Size(width, height), CV_8UC1);
 
         // Render
         std::function<void()> refreshPreview([&]()
         {
             const double zoom = zoom100 / 100.;
-            filter.SetZoom(zoom);
-            filter.SetIters(iters);
-            filter.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
+            renderer.SetZoom(zoom);
+            renderer.SetIters(iters);
+            renderer.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
 
             cv::imshow(winname_preview, image);
             cv::setWindowTitle(winname_preview, winname_preview + " - zoom: " + std::to_string(zoom)
@@ -202,18 +227,18 @@ static int mandelbrot()
             {
                 if ((flags & cv::EVENT_FLAG_LBUTTON) && (x != x_last || y != y_last))
                 {
-                    center += filter.Position2Coordinate(width, height, x_last, y_last) - filter.Position2Coordinate(width, height, x, y);
+                    center += renderer.Position2Coordinate(width, height, x_last, y_last) - renderer.Position2Coordinate(width, height, x, y);
                     x_last = x;
                     y_last = y;
-                    filter.SetCenter(center.real(), center.imag());
+                    renderer.SetCenter(center.real(), center.imag());
                     refreshPreview();
                 }
                 break;
             }
             case cv::EVENT_LBUTTONUP: // left drag - release
             {
-                center += filter.Position2Coordinate(width, height, x_last, y_last) - filter.Position2Coordinate(width, height, x, y);
-                filter.SetCenter(center.real(), center.imag());
+                center += renderer.Position2Coordinate(width, height, x_last, y_last) - renderer.Position2Coordinate(width, height, x, y);
+                renderer.SetCenter(center.real(), center.imag());
                 std::cout << std::setprecision(io_precision) << "Center position changed to "
                     << center << std::setprecision(io_precision_origin) << std::endl;
                 if (x != x_last || y != y_last) refreshPreview();
@@ -221,8 +246,8 @@ static int mandelbrot()
             }
             case cv::EVENT_RBUTTONUP: // right click
             {
-                center = filter.Position2Coordinate(width, height, x, y);
-                filter.SetCenter(center.real(), center.imag());
+                center = renderer.Position2Coordinate(width, height, x, y);
+                renderer.SetCenter(center.real(), center.imag());
                 std::cout << std::setprecision(io_precision) << "Center position changed to "
                     << center << std::setprecision(io_precision_origin) << std::endl;
                 refreshPreview();
@@ -254,14 +279,15 @@ static int mandelbrot()
 
     std::cout <<
         "Set start zoom (scale in log2) - a float in [0, +inf), default " + std::to_string(zoom_start) + ".\n"
-        "    Leave blank to use the default setting.\n"
-        "Your option: ";
+        "    Leaving it blank implies the default setting.\n";
 
     while (true)
     {
+        std::cout << "Your option: ";
         std::getline(std::cin, input);
         if (input == "") break;
         else zoom_start = std::stod(input);
+
         if (zoom_start < 0) std::cout << "Invalid input! Try again.\n";
         else break;
     }
@@ -273,14 +299,15 @@ static int mandelbrot()
 
     std::cout <<
         "Set start max iterations (relative to zoom=0) - an integer in [8, +inf), default " + std::to_string(iters) + ".\n"
-        "    Leave blank to use the default setting.\n"
-        "Your option: ";
+        "    Leaving it blank implies the default setting.\n";
 
     while (true)
     {
+        std::cout << "Your option: ";
         std::getline(std::cin, input);
         if (input == "") break;
         else iters = std::stoi(input);
+
         if (iters < 8) std::cout << "Invalid input! Try again.\n";
         else break;
     }
@@ -292,21 +319,22 @@ static int mandelbrot()
 
     std::cout <<
         "Set start iteration increment - an integer in [0, +inf), default " + std::to_string(iter_inc) + ".\n"
-        "    Leave blank to use the default setting.\n"
-        "Your option: ";
+        "    Leaving it blank implies the default setting.\n";
 
     while (true)
     {
+        std::cout << "Your option: ";
         std::getline(std::cin, input);
         if (input == "") break;
         else iter_inc = std::stoi(input);
+
         if (iter_inc < 0) std::cout << "Invalid input! Try again.\n";
         else break;
     }
 
     std::cout << std::endl;
 
-    // Initializations
+    // Initialize parameters
     double zoom = 0;
     while (zoom < zoom_start)
     {
@@ -314,18 +342,14 @@ static int mandelbrot()
         iters += iter_inc;
     }
 
-    Mandelbrot filter(center.real(), center.imag(), coloring);
-    filter.SetIterStep(iter_step);
-    cv::Mat image(cv::Size(width, height), CV_8UC1);
-
     // Render
     int64_t start_t = cv::getTickCount();
     while (zoom < zoom_max)
     {
         int64_t start_t = cv::getTickCount();
-        filter.SetZoom(zoom);
-        filter.SetIters(iters);
-        filter.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
+        renderer.SetZoom(zoom);
+        renderer.SetIters(iters);
+        renderer.Render(image.ptr<uint8_t>(), image.rows, image.cols, image.step, uchar(255), uchar(0));
         double duration = (cv::getTickCount() - start_t) * 1000 / cv::getTickFrequency();
         std::cout << "zoom: " << zoom << ", max iterations: " << iters << ", time elapsed: " << duration << "ms.\n";
 
